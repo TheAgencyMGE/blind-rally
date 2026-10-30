@@ -1,0 +1,30 @@
+{
+  "name": "blind-rally",
+  "version": "1.0.0",
+  "description": "Know the route. Not the destination. A free, open-source, mobile-first real-world navigation game.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test \"tests/*.test.js\"",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheAgencyMGE/blind-rally.git"
+  },
+  "homepage": "https://theagencymge.github.io/blind-rally/",
+  "keywords": [
+    "game",
+    "gps",
+    "navigation",
+    "pwa",
+    "maplibre",
+    "openstreetmap",
+    "osrm"
+  ]
+}

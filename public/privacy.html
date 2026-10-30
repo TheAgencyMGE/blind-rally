@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Privacy — Blind Rally</title>
+  <meta name="theme-color" content="#0b0c0e">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./css/app.css">
+  <style>
+    .doc { max-width: 640px; margin: 0 auto; padding: calc(var(--safe-top) + 24px) var(--gutter) calc(var(--safe-bottom) + 48px); }
+    .doc h1 { font: 800 48px/1 var(--display); text-transform: uppercase; margin: 16px 0 8px; }
+    .doc h2 { font: 800 24px/1.1 var(--display); text-transform: uppercase; letter-spacing: .03em; margin: 32px 0 8px; color: var(--accent); }
+    .doc p, .doc li { color: var(--muted); }
+    .doc strong { color: var(--text); }
+    .doc ul { padding-left: 20px; }
+    .doc table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .doc th, .doc td { text-align: left; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--muted); }
+    .doc th { color: var(--text); }
+  </style>
+</head>
+<body>
+  <main class="doc">
+    <a class="btn btn--small btn--ghost" href="./">← Back to Blind Rally</a>
+    <h1>Privacy</h1>
+    <p>Last updated 29 October 2026.</p>
+    <p><strong>Short version:</strong> Blind Rally has no accounts, no analytics, no ads, no cookies and no server of its own that receives your data. Your stats live in your browser. Your location is used only while you play, only in the foreground, and is never stored.</p>
+
+    <h2>Location</h2>
+    <ul>
+      <li>We ask for location permission only when you tap <strong>Use my location</strong>, or when a rally starts and needs to detect your arrival.</li>
+      <li>Your position is checked <strong>only while the game is open and visible</strong>. When you switch apps or lock your phone, GPS checking stops. There is no background tracking.</li>
+      <li>Your track is never recorded. The game keeps a running distance total in memory and discards each position after using it.</li>
+      <li>To find a destination and a route, your <strong>starting coordinates</strong> are sent to the public OpenStreetMap services listed below. Nothing identifies you in those requests beyond what any web request reveals (such as your IP address).</li>
+      <li>You can always pick a starting point on the map instead of sharing your location.</li>
+    </ul>
+
+    <h2>What stays on your device</h2>
+    <p>Stored in your browser's local storage, and nowhere else:</p>
+    <ul>
+      <li>Settings (mode, difficulty, units, distance, vibration, screen-awake).</li>
+      <li>Stats: completed and abandoned counts, best times, your last 30 rallies (destination name, time, difficulty, date) and identifiers of destinations you've discovered so you aren't sent to the same place twice.</li>
+      <li>While a rally is in progress: the hidden destination, so you can recover from an accidental refresh. It is deleted the moment the rally ends.</li>
+    </ul>
+    <p>Starting locations are never stored. You can erase everything in <strong>Settings → Erase all local data</strong>, or by clearing site data in your browser.</p>
+
+    <h2>Third-party services</h2>
+    <table>
+      <thead><tr><th>Service</th><th>What it receives</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Map tile requests for the area being shown</td><td>Drawing the 3D map</td></tr>
+        <tr><td>Wikipedia geosearch</td><td>Your start coordinates and search radius, only if Overpass is unavailable</td><td>Fallback for finding places</td></tr>
+        <tr><td>Overpass API (overpass-api.de)</td><td>Your start coordinates and search radius</td><td>Finding public places nearby</td></tr>
+        <tr><td>OSRM routing on FOSSGIS servers (routing.openstreetmap.de), OSRM demo server</td><td>Start and destination coordinates</td><td>Calculating the route</td></tr>
+        <tr><td>Nominatim (nominatim.openstreetmap.org)</td><td>Only the text you type into the start-point search</td><td>Finding a place on the map</td></tr>
+        <tr><td>Wikidata, Wikipedia, Wikimedia Commons</td><td>The discovered destination's Wikidata/Wikipedia identifier</td><td>Showing a photo and description after you arrive</td></tr>
+      </tbody>
+    </table>
+    <p>Each service is operated by volunteers or non-profits under its own privacy policy: <a href="https://openfreemap.org/privacy" target="_blank" rel="noopener">OpenFreeMap</a>, <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">OpenStreetMap Foundation</a>, <a href="https://www.fossgis.de/datenschutzerklaerung/" target="_blank" rel="noopener">FOSSGIS</a>, <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener">Wikimedia Foundation</a>.</p>
+
+    <h2>Hosting</h2>
+    <p>The site is served as static files. The host (for example Cloudflare Pages) may keep standard request logs; Blind Rally adds no tracking of its own.</p>
+
+    <h2>Sharing</h2>
+    <p>The Share button uses your device's share sheet. The shared text contains your time, difficulty and route length — never coordinates or the destination's name.</p>
+
+    <h2>Safety</h2>
+    <p>Play responsibly. In driving mode, a passenger must operate the phone at all times. Obey traffic laws, respect private property and stay aware of your surroundings.</p>
+
+    <h2>Contact</h2>
+    <p>Blind Rally is open source under the MIT license. Questions or concerns can be raised on the project's issue tracker.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,77 @@
+// Central configuration. Everything a self-hoster might want to change lives here.
+
+export const DIFFICULTIES = {
+  rookie: { id: 'rookie', label: 'Rookie', briefingSec: 60 },
+  pro: { id: 'pro', label: 'Pro', briefingSec: 30 },
+  insane: { id: 'insane', label: 'Insane', briefingSec: 15 },
+};
+
+export const MODES = {
+  walk: {
+    id: 'walk',
+    label: 'Walking',
+    osrmProfile: 'foot',
+    // Destination radius bounds (metres) offered in settings.
+    radiusOptions: [500, 1000, 1500, 2000, 3000],
+    defaultRadius: 1500,
+    arrivalRadius: 35,
+    maxAcceptableAccuracy: 60,
+    dwellMs: 6000,
+    maxDwellSpeed: 3, // m/s — faster than this and you're passing by, not arriving
+    maxSnapDistance: 80, // POI must be within this many metres of a walkable way
+  },
+  drive: {
+    id: 'drive',
+    label: 'Driving',
+    osrmProfile: 'driving',
+    radiusOptions: [2000, 4000, 6000, 10000, 15000],
+    defaultRadius: 4000,
+    arrivalRadius: 60,
+    maxAcceptableAccuracy: 80,
+    dwellMs: 10000,
+    maxDwellSpeed: 4,
+    maxSnapDistance: 150,
+  },
+};
+
+// Destinations are never closer than this fraction of the max radius (straight line).
+export const MIN_RADIUS_FRACTION = 0.35;
+// Reject routes that are far longer than the radius suggests (rivers, motorways, detours).
+export const MAX_ROUTE_DETOUR = 2.2;
+// Routes with more maneuvers than this are unmemorable mazes — skip them.
+export const MAX_ROUTE_STEPS = 22;
+// How many candidates we're willing to route before giving up.
+export const MAX_ROUTE_ATTEMPTS = 6;
+
+export const SERVICES = {
+  // Overpass API (OpenStreetMap data). Add mirrors here; they're tried in order.
+  // When all fail, places come from Wikipedia geosearch instead (see rally.js).
+  overpass: ['https://overpass-api.de/api/interpreter'],
+  // OSRM-compatible routers per profile. The FOSSGIS servers support foot + car;
+  // the OSRM demo server is car-only and used as a driving fallback.
+  routing: {
+    foot: ['https://routing.openstreetmap.de/routed-foot/route/v1/foot'],
+    driving: [
+      'https://routing.openstreetmap.de/routed-car/route/v1/driving',
+      'https://router.project-osrm.org/route/v1/driving',
+    ],
+  },
+  // Free vector tiles, no key, no usage limits (https://openfreemap.org).
+  mapStyle: 'https://tiles.openfreemap.org/styles/dark',
+  wikidata: 'https://www.wikidata.org/w/api.php',
+  // Fallback place source when Overpass is unavailable.
+  wikipediaApi: (lang) => `https://${lang}.wikipedia.org/w/api.php`,
+  wikipediaSummary: (lang, title) =>
+    `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+  commonsFile: (file, width = 800) =>
+    `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=${width}`,
+};
+
+// Politeness: minimum gap between requests to the same public service.
+export const MIN_REQUEST_GAP_MS = { overpass: 2000, routing: 1100, wiki: 200 };
+export const REQUEST_TIMEOUT_MS = { overpass: 8000, routing: 12000, wiki: 8000 };
+// Overpass results are cached in memory (never on disk) so "play again" doesn't re-query.
+export const POI_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+export const HISTORY_LIMIT = 30;
+export const AVOID_RECENT = 15; // don't repeat one of the last N destinations
