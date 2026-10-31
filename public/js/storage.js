@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS = {
   mode: 'walk',
   difficulty: 'pro',
   walkRadius: 1500,
+  bikeRadius: 3000,
   driveRadius: 4000,
   units: 'metric',
   haptics: true,
@@ -70,11 +71,19 @@ export function recordResult(stats, result) {
     routeDistance: result.routeDistance ?? null,
     verified: result.verified,
     record: isRecord,
+    // Replay data (optional, present for rallies recorded since scoring was added).
+    ...pick(result, ['score', 'grade', 'parts', 'style', 'accuracy', 'wrongTurns', 'peeks', 'speeding', 'travelled', 'etaSec', 'track', 'route', 'dest']),
   });
   s.history = s.history.slice(0, HISTORY_LIMIT);
   if (result.destId && !s.discovered.includes(result.destId)) s.discovered.push(result.destId);
   if (s.discovered.length > 2000) s.discovered = s.discovered.slice(-2000);
   return { stats: s, isRecord, previousBest, eligible };
+}
+
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
+  return out;
 }
 
 export function recordAbandon(stats) {

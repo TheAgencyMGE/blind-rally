@@ -11,7 +11,7 @@ const TRANSITIONS = {
   briefing: { begin: 'rally', abandon: 'home' },
   rally: { arrive: 'discovered', abandon: 'home' },
   discovered: { again: 'setup', home: 'home', stats: 'stats' },
-  stats: { back: 'home' },
+  stats: { back: 'home', review: 'discovered' },
   settings: { back: 'home', backToSetup: 'setup' },
 };
 

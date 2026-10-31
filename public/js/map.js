@@ -95,6 +95,57 @@ export function addRoute(map, geometry) {
   map.addLayer({ id: 'br-route', type: 'line', source: 'br-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff8a1f', 'line-width': 6 } });
 }
 
+/** Show or hide the briefed route (used by peeks). */
+export function setRouteVisible(map, on) {
+  for (const id of ['br-route-casing', 'br-route']) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  }
+}
+
+/** The ideal route as a faint dashed line (results screen). */
+export function addIdealRoute(map, geometry) {
+  const data = { type: 'Feature', geometry: { type: 'LineString', coordinates: geometry.map((p) => [p.lon, p.lat]) } };
+  map.addSource('br-ideal', { type: 'geojson', data });
+  map.addLayer({ id: 'br-ideal', type: 'line', source: 'br-ideal', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#f2f2ef', 'line-width': 3, 'line-opacity': 0.55, 'line-dasharray': [1.5, 2] } });
+}
+
+/** Your actual path, orange on the route and red where you were off it. `points` are [lat, lon, t, off]. */
+export function trackFeatures(points) {
+  const features = [];
+  let cur = null;
+  for (let i = 0; i < points.length; i++) {
+    const [lat, lon, , off] = points[i];
+    if (!cur || cur.properties.off !== Boolean(off)) {
+      const prev = cur?.geometry.coordinates.at(-1);
+      cur = { type: 'Feature', properties: { off: Boolean(off) }, geometry: { type: 'LineString', coordinates: prev ? [prev] : [] } };
+      features.push(cur);
+    }
+    cur.geometry.coordinates.push([lon, lat]);
+  }
+  return { type: 'FeatureCollection', features: features.filter((f) => f.geometry.coordinates.length > 1) };
+}
+
+export function addTrack(map, points) {
+  map.addSource('br-track', { type: 'geojson', data: trackFeatures(points) });
+  map.addLayer({ id: 'br-track-casing', type: 'line', source: 'br-track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#000', 'line-width': 9, 'line-opacity': 0.5 } });
+  map.addLayer({ id: 'br-track', type: 'line', source: 'br-track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['case', ['get', 'off'], '#ff4d4d', '#ff8a1f'], 'line-width': 5 } });
+}
+
+export function setTrack(map, points) {
+  map.getSource('br-track')?.setData(trackFeatures(points));
+}
+
+/** Fit any set of {lat, lon} points. */
+export function fitPoints(map, points, { padding = 40, pitch = 0, bearing: b = 0, duration = 0, maxZoom = 17 } = {}) {
+  if (!points.length) return;
+  const bounds = new (gl().LngLatBounds)();
+  points.forEach((p) => bounds.extend([p.lon, p.lat]));
+  // Drop any padding left by follow(): fitBounds would otherwise stack both and zoom far out.
+  map.stop();
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+  map.fitBounds(bounds, { padding, pitch, bearing: b, duration, maxZoom });
+}
+
 /** Frame the route tilted, rotated so the journey runs up the screen. */
 export function frameRoute(map, geometry, padding) {
   const b = new (gl().LngLatBounds)();

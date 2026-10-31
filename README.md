@@ -28,11 +28,11 @@ then find a hidden destination from memory, against the clock.
 
 | | |
 |---|---|
-| **1. Start where you stand** | Your GPS position is the start line. Pick walking or driving, a briefing time and a max distance. |
+| **1. Start where you stand** | Your GPS position is the start line. Pick walking, cycling or driving, a briefing time and a max distance. |
 | **2. Memorize** | A tilted 3D map shows the route, the turns and the street names. You get **60 s** (Rookie), **30 s** (Pro) or **15 s** (Insane). |
 | **3. It's gone** | The map, the line and the directions vanish. The stage clock starts. |
-| **4. Find it** | Navigate from memory. Stop at the destination and GPS confirms you've arrived. Tap ⚑ to check in. |
-| **5. Discover** | Only now do you learn where you were going: its name, a photo and your time against your personal best. |
+| **4. Find it** | Navigate from memory on a locked map that only shows where you are. Stuck? Peek at the route for 8 s (3 per rally, −75 each). Stop at the destination and GPS confirms you've arrived. |
+| **5. Discover** | Only now do you learn where you were going: its name, a photo, your time, an S–F grade and a replay of your path against the route you memorized. |
 
 The destination can be **a place** (a monument, museum, fountain or pier), **an area** (a park, plaza or neighbourhood), **a road** (a pedestrian street or scenic drive) or **something scenic** (a viewpoint, beach, waterfall or summit). It is never named until you arrive, not even in the directions or the map labels.
 
@@ -44,6 +44,11 @@ The destination can be **a place** (a monument, museum, fountain or pier), **an 
 - **🗺️ 3D briefing map**: dark vector tiles with extruded buildings, rotated so your route runs up the screen.
 - **🧭 Real, reachable destinations**: public places from OpenStreetMap, routed and checked for walk or car access, with private, restricted and unroutable spots filtered out.
 - **📍 Honest arrival detection**: arrival is gated on GPS accuracy, and you must stay in the zone for a few seconds at low speed, so driving past doesn't count.
+- **🎯 Scored runs**: a 0–1000 score and S–F grade from pace, how much of your path was on the route, extra distance, wrong turns and peeks, with every point itemised. Plus a title for how you played (Human GPS, Speedrunner, Scenic Route…).
+- **↩️ Silent wrong-turn detection**: leaving the briefed route is noticed (with GPS-jitter tolerance) but never shown until the end.
+- **🛑 Speed limits when driving**: OSM `maxspeed` for the road you're on, with sustained speeding counted against the score.
+- **🎬 Replays**: the results map draws your path (orange, red where you were off route) over the dashed briefed route, with a speed chart. Tap any rally in history to replay it.
+- **🖼️ Share card**: an image of your grade, time and the shape of your run.
 - **⏱️ Refresh-proof timer**: the clock is based on timestamps, so a reload drops you straight back into the rally with the clock still running.
 - **🏁 Personal bests** for each mode and difficulty, plus history and stats, all stored on your device.
 - **📱 Installable PWA**: safe-area aware, offline app shell, and the screen stays awake during a rally.
@@ -90,6 +95,10 @@ public/
   js/destinations.js    Overpass query/parse, Wikipedia fallback, weighted ranking
   js/routing.js         OSRM parsing and turn instructions
   js/arrival.js         accuracy-gated, dwell-based arrival detection + odometer
+  js/track.js           silent route tracking: off-route hysteresis, accuracy, path recording
+  js/score.js           0–1000 scoring, grades, play-style titles, speeding detection
+  js/speedlimit.js      OSM maxspeed lookup (driving)
+  js/card.js            share card image (canvas)
   js/timer.js           timestamp timers that survive backgrounding and reloads
   js/storage.js         settings, stats, PBs, scrambled in-progress rally
   js/map.js             MapLibre GL 3D map, buildings, route, label hiding
@@ -113,9 +122,9 @@ tests/                  node:test suites
 <details>
 <summary><b>Game integrity & privacy</b></summary>
 
-- When the briefing ends, the map instance is destroyed, the directions DOM is cleared, and the route is deleted from memory and storage.
+- When the briefing ends, the map instance is destroyed and the directions DOM is cleared. The route is kept only (scrambled) for silent tracking and peeks; it's never drawn unless you spend a peek.
 - The in-progress rally is lightly scrambled in localStorage so a refresh can resume it. This keeps spoilers out of DevTools at a glance; it is not security.
-- GPS is only watched while the page is visible. The track is never stored, only a running distance total.
+- GPS is only watched while the page is visible. Your path is recorded on the device for scoring and replays, and a simplified copy is kept in local history. Nothing is uploaded.
 - Manual confirmation is available when GPS fails. It counts as completed but never toward best times.
 - Full details are in the [privacy policy](https://theagencymge.github.io/blind-rally/privacy.html).
 
@@ -128,9 +137,9 @@ All free and keyless. Please respect their usage policies.
 | Service | Used for | Notes |
 |---|---|---|
 | [OpenFreeMap](https://openfreemap.org) | 3D vector tiles | Free, no key |
-| [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | Finding places | One query per rally, cached in memory |
+| [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | Finding places; speed limits when driving | One query per rally (cached); speed limits at most once per 45 s and 250 m |
 | [Wikipedia geosearch](https://www.mediawiki.org/wiki/API:Geosearch) | Fallback places | Used only when Overpass is unavailable |
-| [OSRM on FOSSGIS](https://routing.openstreetmap.de) | Walking and driving routes | Requests spaced ≥1.1 s apart, at most 6 per rally |
+| [OSRM on FOSSGIS](https://routing.openstreetmap.de) | Walking, cycling and driving routes | Requests spaced ≥1.1 s apart, at most 6 per rally |
 | [OSRM demo](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) | Driving fallback | Demo server, low volume |
 | Wikidata / Wikimedia Commons | Photo on arrival | Credited and linked |
 

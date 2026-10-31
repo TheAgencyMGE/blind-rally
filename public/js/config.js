@@ -19,6 +19,20 @@ export const MODES = {
     dwellMs: 6000,
     maxDwellSpeed: 3, // m/s — faster than this and you're passing by, not arriving
     maxSnapDistance: 80, // POI must be within this many metres of a walkable way
+    offRouteM: 40, // further than this from the briefed route (beyond GPS accuracy) = off route
+  },
+  bike: {
+    id: 'bike',
+    label: 'Cycling',
+    osrmProfile: 'bike',
+    radiusOptions: [1000, 2000, 3000, 5000, 8000],
+    defaultRadius: 3000,
+    arrivalRadius: 45,
+    maxAcceptableAccuracy: 60,
+    dwellMs: 6000,
+    maxDwellSpeed: 3.5,
+    maxSnapDistance: 100,
+    offRouteM: 45,
   },
   drive: {
     id: 'drive',
@@ -31,6 +45,8 @@ export const MODES = {
     dwellMs: 10000,
     maxDwellSpeed: 4,
     maxSnapDistance: 150,
+    offRouteM: 60,
+    speedLimits: true, // look up OSM maxspeed and count speeding
   },
 };
 
@@ -51,6 +67,7 @@ export const SERVICES = {
   // the OSRM demo server is car-only and used as a driving fallback.
   routing: {
     foot: ['https://routing.openstreetmap.de/routed-foot/route/v1/foot'],
+    bike: ['https://routing.openstreetmap.de/routed-bike/route/v1/bike'],
     driving: [
       'https://routing.openstreetmap.de/routed-car/route/v1/driving',
       'https://router.project-osrm.org/route/v1/driving',
@@ -72,6 +89,11 @@ export const MIN_REQUEST_GAP_MS = { overpass: 2000, routing: 1100, wiki: 200 };
 export const REQUEST_TIMEOUT_MS = { overpass: 8000, routing: 12000, wiki: 8000 };
 // Overpass results are cached in memory (never on disk) so "play again" doesn't re-query.
 export const POI_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Peeks: brief looks at the route mid-rally, each costing points (see score.js).
+export const PEEK = { max: 3, seconds: 8 };
+// Speed limit lookups while driving: at most this often, and only after moving this far.
+export const SPEED_LIMIT_LOOKUP = { minGapMs: 45000, minMoveM: 250 };
 
 export const HISTORY_LIMIT = 30;
 export const AVOID_RECENT = 15; // don't repeat one of the last N destinations

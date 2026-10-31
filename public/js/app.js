@@ -1,6 +1,6 @@
 // Blind Rally — UI controller. Wires the state machine to the DOM, GPS, maps and storage.
 
-import { DIFFICULTIES, MODES, SERVICES, AVOID_RECENT } from './config.js';
+import { DIFFICULTIES, MODES, AVOID_RECENT, PEEK, SPEED_LIMIT_LOOKUP } from './config.js';
 import { createMachine } from './state.js';
 import { createStore, recordResult, recordAbandon, bestForMode, bestKey } from './storage.js';
 import { generateRally } from './rally.js';
@@ -10,8 +10,12 @@ import { remainingMs, elapsedMs, formatElapsed, formatCountdown, createTicker } 
 import { formatDistance, isValidCoord, haversine } from './geo.js';
 import { findPhoto } from './photo.js';
 import * as maps from './map.js';
+import { createTracker, speedSeries, shrink } from './track.js';
+import { scoreRally, styleFor, createSpeedWatch, SCORING } from './score.js';
+import { fetchSpeedLimit } from './speedlimit.js';
+import { renderCard } from './card.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.3.0';
 const RESUME_WINDOW_MS = 6 * 60 * 60 * 1000;
 const RING_LEN = 276.46;
 
@@ -42,6 +46,13 @@ const session = {
   settingsReturn: 'home',
   maps: { brief: null, disc: null, rally: null },
   wakeLock: null,
+  tracker: null, // silent route tracking (track.js)
+  peeks: 0,
+  peeking: null,
+  speed: null, // driving only: { watch, lastAt, lastPos, mph }
+  lastFix: null,
+  savedAt: 0,
+  reviewing: false, // results screen opened from history
 };
 
 // ---------------------------------------------------------------- helpers
@@ -169,7 +180,7 @@ function syncSetupControls() {
 
 function currentRadius() {
   const opts = MODES[settings.mode].radiusOptions;
-  const r = settings.mode === 'drive' ? settings.driveRadius : settings.walkRadius;
+  const r = settings[`${settings.mode}Radius`];
   return opts.includes(r) ? r : MODES[settings.mode].defaultRadius;
 }
 
@@ -390,18 +401,25 @@ function endBriefing() {
   $('#brief-dirs').replaceChildren();
   $('#brief-dist').textContent = '—';
   $('#brief-eta').textContent = '—';
-  const r = session.rally;
-  session.rally = {
+  session.rally = rallyFromBriefing(session.rally);
+  session.startedAt = Date.now();
+  store.saveActive({ phase: 'rally', rally: session.rally, startedAt: session.startedAt });
+  go('begin');
+}
+
+/** What the rally phase keeps. The route stays (scrambled at rest) for silent tracking and peeks — it's never drawn unless you peek. */
+function rallyFromBriefing(r) {
+  return {
     id: r.id,
     mode: r.mode,
     difficulty: r.difficulty,
     destination: r.destination,
     arrivalTargets: r.arrivalTargets,
     routeDistance: r.route.distance,
+    etaSec: r.route.duration,
+    start: r.start,
+    geometry: r.route.geometry,
   };
-  session.startedAt = Date.now();
-  store.saveActive({ phase: 'rally', rally: session.rally, startedAt: session.startedAt });
-  go('begin');
 }
 
 onExit.briefing = () => {
@@ -419,7 +437,20 @@ onEnter.rally = (payload) => {
   $('#manual-btn').hidden = true;
   session.gpsTrouble = 0;
   session.weakSince = null;
+  session.lastFix = null;
+  session.savedAt = 0;
+  session.devIndex = 0;
   if (payload.resumed) toast('Resumed — clock kept running');
+
+  const geom = r.geometry ?? [];
+  session.tracker = geom.length > 1
+    ? createTracker(geom, { offRouteM: mode.offRouteM, maxAccuracy: mode.maxAcceptableAccuracy, state: r.trackState })
+    : null;
+  session.peeks = r.peeks ?? 0;
+  renderPeek();
+  session.speed = mode.speedLimits ? { watch: createSpeedWatch(), lastAt: 0, lastPos: null, mph: false } : null;
+  if (session.speed) session.speed.watch.incidents = r.speeding ?? 0;
+  $('#speed-limit').hidden = true;
 
   session.detector = createArrivalDetector({
     targets: r.arrivalTargets,
@@ -441,10 +472,122 @@ onEnter.rally = (payload) => {
 onExit.rally = () => {
   stopTicker();
   stopGps();
+  endPeek();
   destroyMap('rally');
   session.me = null;
   keepAwake(false);
 };
+
+/** Persist tracking progress with the active rally so a refresh loses nothing. */
+function saveProgress(force = false) {
+  const now = Date.now();
+  if (!force && now - session.savedAt < 10000) return;
+  session.savedAt = now;
+  session.rally = {
+    ...session.rally,
+    trackState: session.tracker?.snapshot(),
+    peeks: session.peeks,
+    speeding: session.speed?.watch.incidents ?? 0,
+  };
+  store.saveActive({ phase: 'rally', rally: session.rally, startedAt: session.startedAt });
+}
+
+// ---------------------------------------------------------------- peek
+
+function renderPeek() {
+  const left = PEEK.max - session.peeks;
+  const btn = $('#peek-btn');
+  btn.disabled = left <= 0 || !session.rally?.geometry?.length;
+  btn.setAttribute('aria-label', `Peek at the route (${left} left, −${SCORING.peek} each)`);
+  $('#peek-pips').replaceChildren(...Array.from({ length: PEEK.max }, (_, i) => {
+    const pip = document.createElement('i');
+    pip.classList.toggle('is-used', i >= left);
+    return pip;
+  }));
+}
+
+async function peek() {
+  const r = session.rally;
+  if (session.peeking || session.peeks >= PEEK.max || !r.geometry?.length) return;
+  const ok = await confirmDialog({ title: 'Peek?', body: `${PEEK.seconds} s · −${SCORING.peek}`, ok: 'Peek', cancel: 'No' });
+  const map = session.maps.rally;
+  if (!ok || machine.state !== 'rally' || session.peeking || !map) return;
+  session.peeks += 1;
+  saveProgress(true);
+  renderPeek();
+  haptic(40);
+
+  if (!map.getSource('br-route')) maps.addRoute(map, r.geometry);
+  maps.setRouteVisible(map, true);
+  const finish = maps.addMarker(map, r.geometry[r.geometry.length - 1], 'finish');
+  const pts = session.lastFix ? [...r.geometry, session.lastFix] : r.geometry;
+  const h = map.getContainer().clientHeight;
+  maps.fitPoints(map, pts, { padding: { top: h * 0.22, bottom: h * 0.24, left: 30, right: 30 }, pitch: 30, bearing: map.getBearing(), duration: 600 });
+
+  const endsAt = Date.now() + PEEK.seconds * 1000;
+  $('#peek-btn').classList.add('is-on');
+  const tick = () => {
+    const left = Math.ceil((endsAt - Date.now()) / 1000);
+    $('#peek-left').textContent = left > 0 ? String(left) : '';
+    if (left <= 0) endPeek();
+  };
+  session.peeking = { finish, timer: setInterval(tick, 200) };
+  tick();
+}
+
+function endPeek() {
+  const p = session.peeking;
+  if (!p) return;
+  clearInterval(p.timer);
+  p.finish.remove();
+  session.peeking = null;
+  $('#peek-btn').classList.remove('is-on');
+  $('#peek-left').textContent = '';
+  const map = session.maps.rally;
+  if (map) {
+    maps.setRouteVisible(map, false);
+    if (session.lastFix) maps.follow(map, session.lastFix, null);
+  }
+}
+
+// ---------------------------------------------------------------- speed limits (driving)
+
+function updateSpeed(fix) {
+  const sp = session.speed;
+  if (!sp) return;
+  sp.watch.update(fix.speed, fix.time ?? Date.now());
+  const now = Date.now();
+  const moved = sp.lastPos ? haversine(sp.lastPos, fix) : Infinity;
+  if (now - sp.lastAt > SPEED_LIMIT_LOOKUP.minGapMs && moved > SPEED_LIMIT_LOOKUP.minMoveM && fix.accuracy < 50) {
+    sp.lastAt = now;
+    sp.lastPos = { lat: fix.lat, lon: fix.lon };
+    fetchSpeedLimit(fix)
+      .then((lim) => {
+        if (session.speed !== sp) return;
+        sp.watch.setLimit(lim?.kmh ?? null);
+        sp.mph = lim ? lim.mph : settings.units === 'imperial';
+        renderSpeed(sp.lastSpeed);
+      })
+      .catch(() => { /* Overpass busy: no limit shown, nothing counted */ });
+  }
+  sp.lastSpeed = fix.speed;
+  renderSpeed(fix.speed);
+}
+
+function renderSpeed(speedMs) {
+  const sp = session.speed;
+  const el = $('#speed-limit');
+  const lim = sp?.watch.limit;
+  el.hidden = lim == null;
+  if (lim == null) return;
+  const conv = (kmh) => Math.round(sp.mph ? kmh / 1.609344 : kmh);
+  el.classList.toggle('is-mph', sp.mph);
+  $('#limit-value').textContent = String(conv(lim));
+  const kmh = Number.isFinite(speedMs) ? speedMs * 3.6 : null;
+  $('#speed-now').textContent = kmh == null ? '' : String(conv(kmh));
+  el.classList.toggle('is-over', kmh != null && kmh > lim + 5);
+  el.setAttribute('aria-label', `Limit ${conv(lim)} ${sp.mph ? 'mph' : 'km/h'}`);
+}
 
 function setGps(state, accuracy) {
   const el = $('#gps-status');
@@ -485,13 +628,17 @@ function showMe(fix) {
   else session.me.setLngLat([fix.lon, fix.lat]);
   const heading = fix.speed > 1 && Number.isFinite(fix.heading) ? fix.heading : null;
   if (first) map.jumpTo({ center: [fix.lon, fix.lat] });
-  maps.follow(map, fix, heading);
+  if (!session.peeking) maps.follow(map, fix, heading);
 }
 
 function onFix(fix) {
   if (machine.state !== 'rally' || !session.detector) return;
   const st = session.detector.update(fix);
   if (st.quality === 'invalid') return;
+  session.lastFix = fix;
+  session.tracker?.update(fix);
+  updateSpeed(fix);
+  saveProgress();
   showMe(fix);
   setGps(st.quality, fix.accuracy);
   if (st.quality === 'weak') session.weakSince ??= Date.now();
@@ -562,9 +709,28 @@ function complete(verified) {
   if (machine.state !== 'rally') return;
   const endedAt = Date.now();
   const r = session.rally;
+  endPeek();
+  const timeMs = elapsedMs(session.startedAt, endedAt);
+  const sum = session.tracker?.summary();
+  const travelled = sum?.travelled ?? session.detector?.distanceTravelled ?? null;
+  const inputs = {
+    timeMs,
+    etaSec: r.etaSec ?? null,
+    routeDistance: r.routeDistance,
+    travelled,
+    accuracy: sum?.accuracy ?? null,
+    wrongTurns: sum?.wrongTurns ?? 0,
+    peeks: session.peeks,
+    speeding: session.speed?.watch.incidents ?? 0,
+    difficulty: r.difficulty,
+  };
+  // Rallies resumed from before scoring existed have no route estimate: no grade for those.
+  const scored = r.etaSec ? scoreRally(inputs) : null;
+  const style = scored ? styleFor(inputs, scored) : null;
+  const fullTrack = session.tracker?.track ?? [];
   const entry = {
     date: endedAt,
-    timeMs: elapsedMs(session.startedAt, endedAt),
+    timeMs,
     mode: r.mode,
     difficulty: r.difficulty,
     name: r.destination.name,
@@ -573,6 +739,21 @@ function complete(verified) {
     routeDistance: r.routeDistance,
     verified,
     dev: DEV,
+    ...(scored && {
+      score: scored.score,
+      grade: scored.grade,
+      parts: scored.parts,
+      style: { name: style.name, line: style.line },
+      accuracy: inputs.accuracy,
+      wrongTurns: inputs.wrongTurns,
+      peeks: inputs.peeks,
+      speeding: inputs.speeding,
+      travelled,
+      etaSec: inputs.etaSec,
+      track: packTrack(fullTrack),
+      route: r.geometry ? shrink(r.geometry, 200).map((p) => ({ lat: round5(p.lat), lon: round5(p.lon) })) : undefined,
+      dest: { lat: r.destination.lat, lon: r.destination.lon, tags: photoTags(r.destination.tags) },
+    }),
   };
   let outcome = { isRecord: false, previousBest: stats.best[bestKey(r.mode, r.difficulty)] ?? null };
   if (!DEV) {
@@ -580,24 +761,42 @@ function complete(verified) {
     stats = outcome.stats;
     store.saveStats(stats);
   }
-  session.result = { ...entry, travelled: session.detector?.distanceTravelled ?? null, outcome, destination: r.destination };
+  session.result = { ...entry, travelled, outcome, destination: r.destination, fullTrack };
   store.clearActive();
   go('arrive');
 }
 
+const round5 = (n) => Math.round(n * 1e5) / 1e5;
+
+/** Only the tags findPhoto needs, so a replay can show the photo without storing everything. */
+function photoTags(tags = {}) {
+  const out = {};
+  for (const k of ['wikipedia', 'wikidata', 'wikimedia_commons', 'image']) if (tags[k]) out[k] = tags[k];
+  return out;
+}
+
+/** Shrink a recorded track to ≤300 points for history, keeping [lat, lon, t, off, speed]. */
+function packTrack(track) {
+  if (track.length < 2) return track;
+  const pts = track.map(([lat, lon, t, off, v]) => ({ lat, lon, t, off, v }));
+  return shrink(pts, 300).map((p) => [p.lat, p.lon, p.t, p.off, p.v]);
+}
+
 // ---------------------------------------------------------------- discovered
 
-onEnter.discovered = () => {
+onEnter.discovered = (payload) => {
   const res = session.result;
   const d = res.destination;
-  haptic([200, 80, 200, 80, 400]);
+  session.reviewing = Boolean(payload.review);
+  if (!session.reviewing) haptic([200, 80, 200, 80, 400]);
   $('#disc-kind').textContent = d.label ?? '';
   $('#disc-name').textContent = d.name;
 
   const pb = $('#disc-pb');
   const { isRecord, previousBest } = res.outcome;
-  pb.classList.toggle('is-record', isRecord && res.verified === 'gps' && !res.dev);
-  if (res.dev) pb.textContent = 'dev';
+  pb.classList.toggle('is-record', !session.reviewing && isRecord && res.verified === 'gps' && !res.dev);
+  if (session.reviewing) pb.textContent = new Date(res.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  else if (res.dev) pb.textContent = 'dev';
   else if (res.verified !== 'gps') pb.textContent = 'self-verified';
   else if (isRecord && previousBest != null) pb.textContent = `PB −${fmtDelta(previousBest - res.timeMs)}`;
   else if (isRecord) pb.textContent = 'PB';
@@ -608,6 +807,7 @@ onEnter.discovered = () => {
   $('#disc-meta').textContent = parts.join(' · ');
 
   animateTime($('#disc-time'), res.timeMs);
+  renderScore(res);
 
   const img = $('#disc-img');
   img.hidden = true;
@@ -633,10 +833,104 @@ onEnter.discovered = () => {
   const { map, ready } = maps.createMap($('#disc-map'), { center: [d.lon, d.lat], zoom: 16.5 });
   session.maps.disc = map;
   maps.addMarker(map, d, 'finish');
-  if (!reducedMotion()) {
+  const track = res.fullTrack?.length ? res.fullTrack : res.track ?? [];
+  const route = res.route ?? [];
+  if (track.length > 1 || route.length > 1) {
+    // Your run against the briefed route: dashed = what you memorized, orange = where you went, red = off route.
+    const pts = [...route, ...track.map(([lat, lon]) => ({ lat, lon }))];
+    if (track.length) maps.addMarker(map, { lat: track[0][0], lon: track[0][1] }, 'start-sm');
+    ready.then(() => {
+      if (session.maps.disc !== map) return;
+      maps.fitPoints(map, pts, { padding: { top: 30, bottom: 60, left: 30, right: 30 }, pitch: 35, duration: reducedMotion() ? 0 : 1200 });
+      if (route.length > 1) maps.addIdealRoute(map, route);
+      if (track.length > 1) {
+        maps.addTrack(map, reducedMotion() ? track : track.slice(0, 2));
+        if (!reducedMotion()) drawTrack(map, track);
+      }
+    });
+  } else if (!reducedMotion()) {
     ready.then(() => session.maps.disc === map && map.easeTo({ bearing: map.getBearing() + 60, duration: 8000, easing: (t) => t }));
   }
 };
+
+/** Replay your path onto the results map. */
+function drawTrack(map, track) {
+  setTimeout(() => {
+    const t0 = performance.now();
+    const step = (t) => {
+      if (session.maps.disc !== map) return;
+      const k = Math.min(1, (t - t0) / 2200);
+      maps.setTrack(map, track.slice(0, Math.max(2, Math.ceil(track.length * (1 - Math.pow(1 - k, 2))))));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, 900);
+}
+
+const PART_LABELS = {
+  difficulty: () => 'Briefing time',
+  pace: () => 'Pace',
+  accuracy: () => 'Off route',
+  distance: () => 'Extra distance',
+  wrongTurns: (r) => `Wrong turns ×${r.wrongTurns}`,
+  peeks: (r) => `Peeks ×${r.peeks}`,
+  speeding: (r) => `Speeding ×${r.speeding}`,
+  clean: () => 'Clean run',
+};
+
+function renderScore(res) {
+  const has = res.grade != null;
+  $('#disc-grade-box').hidden = !has;
+  $('#disc-stats').hidden = !has;
+  $('#disc-breakdown').hidden = !has;
+  $('#disc-breakdown').open = false;
+  if (!has) return;
+  const g = $('#disc-grade');
+  g.textContent = res.grade;
+  g.dataset.g = res.grade;
+  $('#disc-style').textContent = res.style?.name ?? '';
+  $('#disc-style-line').textContent = res.style?.line ?? '';
+  $('#disc-score').textContent = `${res.score} / 1000`;
+  $('#disc-acc').textContent = res.accuracy == null ? '—' : `${res.accuracy}%`;
+  $('#disc-wrong').textContent = String(res.wrongTurns ?? 0);
+  $('#disc-peeks').textContent = String(res.peeks ?? 0);
+
+  const row = (label, pts, kind = 'part') => {
+    const li = document.createElement('li');
+    const b = document.createElement('b');
+    if (kind === 'part') {
+      b.textContent = pts > 0 ? `+${pts}` : `−${Math.abs(pts)}`;
+      b.className = pts < 0 ? 'is-neg' : 'is-pos';
+    } else {
+      b.textContent = String(pts);
+      if (kind === 'total') li.className = 'is-total';
+    }
+    li.append(label, b);
+    return li;
+  };
+  $('#disc-parts').replaceChildren(
+    row('Base', SCORING.base, 'base'),
+    ...(res.parts ?? []).map((p) => row(PART_LABELS[p.key]?.(res) ?? p.key, p.points)),
+    row('Total', res.score, 'total'),
+  );
+
+  const svg = $('#disc-speed');
+  const series = speedSeries(res.fullTrack?.length ? res.fullTrack : res.track ?? [], 48);
+  if (series.length < 4) {
+    svg.replaceChildren();
+    return;
+  }
+  const max = Math.max(...series.map((p) => p.v), 0.5);
+  const xy = series.map((p, i) => `${((i / (series.length - 1)) * 300).toFixed(1)},${(78 - (p.v / max) * 72).toFixed(1)}`);
+  const NS = 'http://www.w3.org/2000/svg';
+  const area = document.createElementNS(NS, 'polygon');
+  area.setAttribute('points', `0,80 ${xy.join(' ')} 300,80`);
+  const line = document.createElementNS(NS, 'polyline');
+  line.setAttribute('points', xy.join(' '));
+  svg.replaceChildren(area, line);
+  const top = settings.units === 'imperial' ? `${Math.round(max * 2.23694)} mph` : `${Math.round(max * 3.6)} km/h`;
+  svg.setAttribute('aria-label', `Speed over time, top ${top}`);
+}
 
 onExit.discovered = () => destroyMap('disc');
 
@@ -657,8 +951,10 @@ function animateTime(el, ms) {
 async function share() {
   const res = session.result;
   if (!res) return;
-  const text = `🏁 Blind Rally · ${formatElapsed(res.timeMs, { tenths: false })} · ${DIFFICULTIES[res.difficulty].label} · ${fmtDist(res.routeDistance)}`;
+  const grade = res.grade ? ` · ${res.grade} ${res.score}` : '';
+  const text = `🏁 Blind Rally · ${formatElapsed(res.timeMs, { tenths: false })}${grade} · ${DIFFICULTIES[res.difficulty].label} · ${fmtDist(res.routeDistance)}`;
   const url = new URL('./', location.href).href;
+  if (res.grade && (await shareCard(res, text, url))) return;
   try {
     if (navigator.share) {
       await navigator.share({ title: 'Blind Rally', text, url });
@@ -669,6 +965,48 @@ async function share() {
   } catch (err) {
     if (err?.name !== 'AbortError') toast('Sharing unavailable');
   }
+}
+
+/** Share (or save) the image card. Returns false to fall back to text. */
+async function shareCard(res, text, url) {
+  let blob;
+  try {
+    blob = await renderCard({
+      grade: res.grade,
+      score: res.score,
+      style: res.style ?? { name: 'Blind Rally', line: '' },
+      name: res.name,
+      label: res.label,
+      time: formatElapsed(res.timeMs, { tenths: false }),
+      stats: [
+        ['On route', res.accuracy == null ? '—' : `${res.accuracy}%`],
+        ['Wrong turns', res.wrongTurns ?? 0],
+        ['Peeks', res.peeks ?? 0],
+        ['Distance', fmtDist(res.travelled ?? res.routeDistance)],
+      ],
+      route: res.route,
+      track: res.track,
+      url: url.replace(/^https?:[/][/]/, '').replace(/[/]$/, ''),
+    });
+  } catch {
+    return false;
+  }
+  const file = new File([blob], 'blind-rally.png', { type: 'image/png' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], text: `${text} ${url}` });
+      return true;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return true;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('Saved image');
+  return true;
 }
 
 // ---------------------------------------------------------------- stats
@@ -685,7 +1023,7 @@ onEnter.stats = () => {
       th.textContent = `${d.briefingSec}s`;
       th.title = d.label;
       tr.append(th);
-      for (const mode of ['walk', 'drive']) {
+      for (const mode of Object.keys(MODES)) {
         const td = document.createElement('td');
         const v = stats.best[bestKey(mode, d.id)];
         td.textContent = v == null ? '—' : formatElapsed(v, { tenths: false });
@@ -696,8 +1034,16 @@ onEnter.stats = () => {
     }),
   );
   $('#st-history').replaceChildren(
-    ...stats.history.map((h) => {
+    ...stats.history.map((h, i) => {
       const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.action = 'review';
+      btn.dataset.i = String(i);
+      const grade = document.createElement('span');
+      grade.className = 'history__g';
+      grade.textContent = h.grade ?? '';
+      grade.dataset.g = h.grade ?? '';
       const name = document.createElement('span');
       name.className = 'history__n';
       name.textContent = h.name;
@@ -705,11 +1051,24 @@ onEnter.stats = () => {
       const time = document.createElement('span');
       time.className = `history__t${h.record ? ' is-pb' : ''}${h.verified === 'manual' ? ' is-manual' : ''}`;
       time.textContent = formatElapsed(h.timeMs, { tenths: false });
-      li.append(name, time);
+      btn.append(grade, name, time);
+      li.append(btn);
       return li;
     }),
   );
 };
+
+function review(i) {
+  const h = stats.history[i];
+  const dest = h?.dest ?? h?.route?.at(-1);
+  if (!dest) return toast('No replay for this one');
+  session.result = {
+    ...h,
+    destination: { ...dest, name: h.name, label: h.label },
+    outcome: { isRecord: h.record, previousBest: null },
+  };
+  go('review', { review: true });
+}
 
 // ---------------------------------------------------------------- settings
 
@@ -730,6 +1089,14 @@ function saveSettings(patch) {
 
 function devMove(fraction) {
   if (!loc.simulated || !session.rally) return;
+  const g = session.rally.geometry;
+  if (g?.length > 1 && fraction < 1) {
+    // Walk along the briefed route so tracking sees a realistic run.
+    session.devIndex = Math.min(g.length - 1, session.devIndex + Math.max(1, Math.round(g.length / 6)));
+    const p = g[session.devIndex];
+    loc.setPosition({ lat: p.lat, lon: p.lon, accuracy: 8 });
+    return;
+  }
   const target = session.rally.arrivalTargets[1] ?? session.rally.arrivalTargets[0];
   const cur = loc.position;
   if (fraction >= 1) {
@@ -755,10 +1122,12 @@ const actions = {
   },
   'begin-now': () => endBriefing(),
   'check-in': () => checkIn(),
+  peek: () => peek(),
+  review: (el) => review(Number(el.dataset.i)),
   'manual-verify': () => manualVerify(),
   abandon: () => abandon(),
   again: () => go('again'),
-  home: () => go('home'),
+  home: () => go(session.reviewing ? 'stats' : 'home'),
   share: () => share(),
   'resume-active': () => resumeActive(true),
   'discard-active': async () => {
@@ -780,6 +1149,7 @@ const actions = {
   },
   'dev-step': () => devMove(0.5),
   'dev-arrive': () => devMove(1),
+  'dev-off': () => loc.simulated && loc.setPosition({ lat: loc.position.lat + 0.0012, lon: loc.position.lon + 0.0015, accuracy: 8 }),
   'dev-weak': () => loc.simulated && loc.setPosition({ accuracy: loc.position.accuracy > 100 ? 8 : 150 }),
 };
 
@@ -802,7 +1172,7 @@ document.addEventListener('change', (e) => {
   } else if (t.name === 'difficulty') {
     saveSettings({ difficulty: t.value });
   } else if (t.name === 'radius') {
-    saveSettings(settings.mode === 'drive' ? { driveRadius: Number(t.value) } : { walkRadius: Number(t.value) });
+    saveSettings({ [`${settings.mode}Radius`]: Number(t.value) });
   } else if (t.id === 'drive-ack') {
     updateScoutButton();
   } else if (t.name === 'units') {
@@ -855,9 +1225,7 @@ function resumeActive(fromBanner = false) {
   }
   // Briefing expired while away, or we were mid-rally: the clock started when the briefing ended.
   const r = active.rally;
-  session.rally = r.route
-    ? { id: r.id, mode: r.mode, difficulty: r.difficulty, destination: r.destination, arrivalTargets: r.arrivalTargets, routeDistance: r.route.distance }
-    : r;
+  session.rally = r.route ? rallyFromBriefing(r) : r;
   session.startedAt = active.phase === 'rally' ? active.startedAt : active.briefingEndsAt;
   if (!session.rally.destination || !session.startedAt) {
     store.clearActive();

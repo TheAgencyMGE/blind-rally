@@ -37,6 +37,8 @@
       <symbol id="i-walk" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M9 21l3-6 3 3v3M12 15l-1-5 4 2 3 1M11 10l-4 2-1 4"/></g></symbol>
       <symbol id="i-car" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3v-5l2-5h14l2 5v5h-2M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/></g></symbol>
       <symbol id="i-locate" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></g></symbol>
+      <symbol id="i-bike" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M5.5 16.5L9 9h7l2.5 7.5M12 16.5L9 9M15 6h2l-1 3"/></g></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g></symbol>
       <symbol id="i-share" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M7 8l5-5 5 5M5 13v7h14v-7"/></symbol>
       <symbol id="i-home" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 11l9-7 9 7M5 10v10h14V10"/></symbol>
       <symbol id="i-again" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></symbol>
@@ -95,6 +97,7 @@
 
         <div class="seg seg--icons" role="radiogroup" aria-label="Travel mode">
           <label><input type="radio" name="mode" value="walk" aria-label="Walking"><span><svg><use href="#i-walk"/></svg></span></label>
+          <label><input type="radio" name="mode" value="bike" aria-label="Cycling"><span><svg><use href="#i-bike"/></svg></span></label>
           <label><input type="radio" name="mode" value="drive" aria-label="Driving"><span><svg><use href="#i-car"/></svg></span></label>
         </div>
 
@@ -153,10 +156,15 @@
       <div class="dev" id="dev-panel" hidden>
         <button class="btn btn--small" data-action="dev-step">Step</button>
         <button class="btn btn--small" data-action="dev-arrive">Arrive</button>
+        <button class="btn btn--small" data-action="dev-off">Off</button>
         <button class="btn btn--small" data-action="dev-weak">Weak GPS</button>
       </div>
       <div class="dock">
-        <button class="here" data-action="check-in" id="checkin-btn" aria-label="I'm here, check in"><svg><use href="#i-flag"/></svg></button>
+        <div class="dock__rally">
+          <button class="peek" data-action="peek" id="peek-btn" aria-label="Peek at the route"><svg><use href="#i-eye"/></svg><span class="peek__pips" id="peek-pips" aria-hidden="true"></span><span class="peek__left num" id="peek-left" aria-hidden="true"></span></button>
+          <button class="here" data-action="check-in" id="checkin-btn" aria-label="I'm here, check in"><svg><use href="#i-flag"/></svg></button>
+          <div class="limit" id="speed-limit" hidden aria-live="polite"><span class="limit__sign num" id="limit-value"></span><span class="limit__now num" id="speed-now"></span></div>
+        </div>
         <button class="fine fine--link" data-action="manual-verify" id="manual-btn" hidden>GPS failing? Confirm manually</button>
       </div>
     </section>
@@ -170,6 +178,20 @@
         <h2 class="disc__name" id="disc-name"></h2>
         <p class="disc__time num" id="disc-time">00:00.0</p>
         <p class="disc__pb num" id="disc-pb"></p>
+        <div class="grade" id="disc-grade-box" hidden>
+          <span class="grade__l" id="disc-grade"></span>
+          <span class="grade__s"><b id="disc-style"></b><span id="disc-style-line"></span><span class="num" id="disc-score"></span></span>
+        </div>
+        <dl class="pair pair--3 disc__stats" id="disc-stats" hidden>
+          <div><dt>On route</dt><dd class="num" id="disc-acc"></dd></div>
+          <div><dt>Wrong turns</dt><dd class="num" id="disc-wrong"></dd></div>
+          <div><dt>Peeks</dt><dd class="num" id="disc-peeks"></dd></div>
+        </dl>
+        <details class="breakdown" id="disc-breakdown" hidden>
+          <summary>Score</summary>
+          <ol id="disc-parts"></ol>
+          <svg class="speed" id="disc-speed" viewBox="0 0 300 80" preserveAspectRatio="none" aria-label="Speed over time"></svg>
+        </details>
         <p class="fine" id="disc-meta"></p>
         <p class="fine" id="disc-credit" hidden></p>
       </div>
@@ -192,7 +214,7 @@
           <div><dt>Quit</dt><dd class="num" id="st-abandoned">0</dd></div>
         </dl>
         <table class="best">
-          <thead><tr><th scope="col"><span class="sr-only">Briefing</span></th><th scope="col" aria-label="Walking"><svg><use href="#i-walk"/></svg></th><th scope="col" aria-label="Driving"><svg><use href="#i-car"/></svg></th></tr></thead>
+          <thead><tr><th scope="col"><span class="sr-only">Briefing</span></th><th scope="col" aria-label="Walking"><svg><use href="#i-walk"/></svg></th><th scope="col" aria-label="Cycling"><svg><use href="#i-bike"/></svg></th><th scope="col" aria-label="Driving"><svg><use href="#i-car"/></svg></th></tr></thead>
           <tbody id="st-best"></tbody>
         </table>
         <ol class="history" id="st-history"></ol>
