@@ -76,6 +76,18 @@ export function addMarker(map, p, kind) {
   return new (gl().Marker)({ element: markerEl(`mk--${kind}`) }).setLngLat([p.lon, p.lat]).addTo(map);
 }
 
+/** Keep the camera on the player, heading-up once they're moving. Shows nothing but where you are. */
+export function follow(map, p, heading) {
+  const h = map.getContainer().clientHeight;
+  map.easeTo({
+    center: [p.lon, p.lat],
+    bearing: Number.isFinite(heading) ? heading : map.getBearing(),
+    padding: { top: h * 0.35, bottom: h * 0.15, left: 0, right: 0 },
+    duration: 900,
+    easing: (t) => t,
+  });
+}
+
 export function addRoute(map, geometry) {
   const data = { type: 'Feature', geometry: { type: 'LineString', coordinates: geometry.map((p) => [p.lon, p.lat]) } };
   map.addSource('br-route', { type: 'geojson', data });

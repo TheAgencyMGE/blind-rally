@@ -23,6 +23,7 @@ function toFix(pos) {
     lon: pos.coords.longitude,
     accuracy: pos.coords.accuracy,
     speed: pos.coords.speed,
+    heading: pos.coords.heading,
     time: pos.timestamp || Date.now(),
   };
 }

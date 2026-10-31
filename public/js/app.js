@@ -40,7 +40,7 @@ const session = {
   weakSince: null,
   result: null,
   settingsReturn: 'home',
-  maps: { brief: null, disc: null },
+  maps: { brief: null, disc: null, rally: null },
   wakeLock: null,
 };
 
@@ -433,6 +433,7 @@ onEnter.rally = (payload) => {
     if (session.weakSince && now - session.weakSince > 60000) $('#manual-btn').hidden = false;
   }, { interval: 100 });
   session.ticker.start();
+  startRallyMap();
   startGps();
   keepAwake(true);
 };
@@ -440,6 +441,8 @@ onEnter.rally = (payload) => {
 onExit.rally = () => {
   stopTicker();
   stopGps();
+  destroyMap('rally');
+  session.me = null;
   keepAwake(false);
 };
 
@@ -461,10 +464,35 @@ function stopGps() {
   session.stopWatch = null;
 }
 
+// Locked map that only follows the player: no route, no destination, no panning.
+function startRallyMap() {
+  destroyMap('rally');
+  session.me = null;
+  const { map, ready } = maps.createMap($('#rally-map'), { zoom: 17, interactive: false });
+  session.maps.rally = map;
+  const name = session.rally.destination.name;
+  ready.then(() => {
+    if (session.maps.rally !== map) return;
+    try { maps.hideLabel(map, name); } catch { /* labels are cosmetic */ }
+  });
+}
+
+function showMe(fix) {
+  const map = session.maps.rally;
+  if (!map) return;
+  const first = !session.me;
+  if (first) session.me = maps.addMarker(map, fix, 'me');
+  else session.me.setLngLat([fix.lon, fix.lat]);
+  const heading = fix.speed > 1 && Number.isFinite(fix.heading) ? fix.heading : null;
+  if (first) map.jumpTo({ center: [fix.lon, fix.lat] });
+  maps.follow(map, fix, heading);
+}
+
 function onFix(fix) {
   if (machine.state !== 'rally' || !session.detector) return;
   const st = session.detector.update(fix);
   if (st.quality === 'invalid') return;
+  showMe(fix);
   setGps(st.quality, fix.accuracy);
   if (st.quality === 'weak') session.weakSince ??= Date.now();
   else session.weakSince = null;

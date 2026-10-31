@@ -191,8 +191,15 @@ body[data-screen="countdown"] .countdown { display: grid; }
 .gps.is-good i { background: var(--ok); }
 .gps.is-weak i { background: var(--warn); }
 .gps.is-bad i { background: var(--danger); }
-.rally__time { margin: auto 0 12px; text-align: center; font-size: clamp(88px, 28vw, 150px); line-height: .9; }
-.screen--rally .fine--warn { margin-bottom: auto; }
+.screen--rally { position: relative; height: 100dvh; overflow: hidden; }
+.screen--rally > * { position: relative; z-index: 2; }
+.screen--rally > .rally__map { position: absolute; inset: 0; z-index: 0; background: var(--bg); }
+.screen--rally::before, .screen--rally::after { content: ''; position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none; }
+.screen--rally::before { top: 0; height: 30%; background: linear-gradient(var(--bg) 20%, transparent); }
+.screen--rally::after { bottom: 0; height: 32%; background: linear-gradient(transparent, var(--bg) 75%); }
+.rally__time { margin: 4px 0 0; text-align: center; font-size: clamp(64px, 20vw, 112px); line-height: .9; text-shadow: 0 2px 24px var(--bg); }
+.screen--rally .fine--warn { text-align: center; }
+.rally__map .maplibregl-ctrl-bottom-right { z-index: 3; }
 .here {
   width: 128px; height: 128px; border-radius: 50%;
   display: grid; place-items: center;
@@ -268,12 +275,14 @@ body[data-screen="countdown"] .countdown { display: grid; }
 .maplibregl-ctrl-attrib-button { filter: invert(1); }
 .mk { width: 18px; height: 18px; border-radius: 50%; }
 .mk--start { background: var(--text); box-shadow: 0 0 0 5px rgba(242, 242, 239, .25); }
+.mk--me { background: var(--accent); border: 3px solid #fff; box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: me 1.8s ease-out infinite; }
+@keyframes me { to { box-shadow: 0 0 0 18px transparent; } }
 .mk--finish { width: 26px; height: 26px; border-radius: 6px; background: conic-gradient(#fff 25%, #111 0 50%, #fff 0 75%, #111 0) 0 0 / 13px 13px; border: 2px solid var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, .6); }
 .brief__map .maplibregl-ctrl-bottom-right { bottom: calc(34dvh + 110px); }
 
 /* ---------- desktop ---------- */
 @media (min-width: 900px) {
-  body[data-screen="briefing"] .app, body[data-screen="countdown"] .app { max-width: none; }
+  body[data-screen="briefing"] .app, body[data-screen="countdown"] .app, body[data-screen="rally"] .app { max-width: none; }
   .brief__sheet { left: auto; width: 420px; top: 0; align-content: end; background: linear-gradient(90deg, transparent, var(--bg) 16%); padding-left: 64px; }
   .dirs { max-height: 70dvh; }
   .brief__hud { right: 420px; }
