@@ -1,7 +1,7 @@
 // Service worker: caches the app shell so Blind Rally opens instantly and survives flaky
 // connections mid-rally. Third-party requests (map tiles, routing, places) are never
 // intercepted — they go straight to the network under each provider's own caching rules.
-const VERSION = 'br-v1.3.0';
+const VERSION = 'br-v1.4.0';
 const SHELL = [
   './',
   './index.html',

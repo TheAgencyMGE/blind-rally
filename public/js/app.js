@@ -1,9 +1,9 @@
 // Blind Rally — UI controller. Wires the state machine to the DOM, GPS, maps and storage.
 
-import { DIFFICULTIES, MODES, AVOID_RECENT, PEEK, SPEED_LIMIT_LOOKUP } from './config.js';
+import { DIFFICULTIES, MODES, TARGETS, CITY, AVOID_RECENT, PEEK, SPEED_LIMIT_LOOKUP } from './config.js';
 import { createMachine } from './state.js';
 import { createStore, recordResult, recordAbandon, bestForMode, bestKey } from './storage.js';
-import { generateRally } from './rally.js';
+import { generateRally, fetchPois } from './rally.js';
 import { createArrivalDetector } from './arrival.js';
 import { createGeoProvider, createSimProvider } from './location.js';
 import { remainingMs, elapsedMs, formatElapsed, formatCountdown, createTicker } from './timer.js';
@@ -15,7 +15,7 @@ import { scoreRally, styleFor, createSpeedWatch, SCORING } from './score.js';
 import { fetchSpeedLimit } from './speedlimit.js';
 import { renderCard } from './card.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const RESUME_WINDOW_MS = 6 * 60 * 60 * 1000;
 const RING_LEN = 276.46;
 
@@ -148,7 +148,7 @@ function go(event, payload) {
 // ---------------------------------------------------------------- home
 
 onEnter.home = () => {
-  const best = bestForMode(stats, settings.mode);
+  const best = bestForMode(stats, settings.mode, settings.target);
   $('#home-best').textContent = best == null ? '—' : formatElapsed(best, { tenths: false });
   $('#home-count').textContent = String(stats.completed);
   $('#resume-banner').hidden = !store.getActive();
@@ -174,20 +174,32 @@ async function autoLocate() {
 function syncSetupControls() {
   $$('input[name="mode"]').forEach((r) => { r.checked = r.value === settings.mode; });
   $$('input[name="difficulty"]').forEach((r) => { r.checked = r.value === settings.difficulty; });
+  $$('input[name="target"]').forEach((r) => { r.checked = r.value === settings.target; });
+  $('#target-note').textContent = TARGET_NOTES[settings.target] ?? '';
   $('#drive-safety').hidden = settings.mode !== 'drive';
   renderRadiusChips();
 }
 
+const TARGET_NOTES = {
+  landmark: 'A cool landmark. Memorize the route.',
+  random: 'A random public spot. Could be great. Could be grim.',
+  city: 'A whole town, far away. Vague directions only.',
+};
+
+// Cities search a much wider radius, with their own remembered setting per mode.
+const radiusKey = () => (settings.target === 'city' ? `${settings.mode}CityRadius` : `${settings.mode}Radius`);
+const radiusOptions = () => (settings.target === 'city' ? CITY.radiusOptions[settings.mode] : MODES[settings.mode].radiusOptions);
+
 function currentRadius() {
-  const opts = MODES[settings.mode].radiusOptions;
-  const r = settings[`${settings.mode}Radius`];
-  return opts.includes(r) ? r : MODES[settings.mode].defaultRadius;
+  const r = settings[radiusKey()];
+  if (radiusOptions().includes(r)) return r;
+  return settings.target === 'city' ? CITY.defaultRadius[settings.mode] : MODES[settings.mode].defaultRadius;
 }
 
 function renderRadiusChips() {
   const cur = currentRadius();
   $('#radius-chips').replaceChildren(
-    ...MODES[settings.mode].radiusOptions.map((r) => {
+    ...radiusOptions().map((r) => {
       const label = document.createElement('label');
       const input = document.createElement('input');
       input.type = 'radio';
@@ -260,6 +272,7 @@ onEnter.scouting = async () => {
     const rally = await generateRally({
       start: session.start,
       mode: settings.mode,
+      target: settings.target,
       difficulty: settings.difficulty,
       radius: currentRadius(),
       avoidIds: stats.discovered.slice(-AVOID_RECENT),
@@ -325,8 +338,10 @@ function briefPadding() {
 
 function renderBriefing() {
   const r = session.rally;
-  $('#brief-dist').textContent = fmtDist(r.route.distance);
-  $('#brief-eta').textContent = fmtDuration(r.route.duration);
+  const city = r.target === 'city';
+  $('.screen--briefing').classList.toggle('is-city', city);
+  $('#brief-dist').textContent = city ? `~${fmtDist(r.hint.straight)}` : fmtDist(r.route.distance);
+  $('#brief-eta').textContent = city ? r.destination.label : fmtDuration(r.route.duration);
   $('#brief-count').textContent = String(DIFFICULTIES[r.difficulty].briefingSec);
   $('#ring-fill').style.strokeDashoffset = '0';
   $('#brief-ring').classList.remove('is-urgent');
@@ -357,6 +372,7 @@ function renderBriefing() {
   $('#brief-dirs').scrollTop = 0;
 
   destroyMap('brief');
+  if (city) return renderCityBrief(r);
   const geom = r.route.geometry;
   const { map, ready } = maps.createMap($('#brief-map'), { center: [r.start.lon, r.start.lat], zoom: 14 });
   session.maps.brief = map;
@@ -365,9 +381,21 @@ function renderBriefing() {
   maps.addMarker(map, geom[geom.length - 1], 'finish');
   ready.then(() => {
     if (session.maps.brief !== map) return;
-    try { maps.hideLabel(map, r.destination.name); } catch { /* labels are cosmetic */ }
+    // A random spot is named after its street, which the directions need to show.
+    if (r.target !== 'random') try { maps.hideLabel(map, r.destination.name); } catch { /* labels are cosmetic */ }
     maps.addRoute(map, geom);
   });
+}
+
+/** City briefing: the town's name, which way and roughly how far, and the big roads. No map, no turns. */
+function renderCityBrief(r) {
+  const h = r.hint;
+  $('#city-name').textContent = r.destination.name;
+  $('#city-arrow').style.transform = `rotate(${h.bearing}deg)`;
+  $('#city-dir').textContent = `Head ${h.direction}`;
+  $('#city-far').textContent = `About ${fmtDist(h.straight)} as the crow flies`;
+  $('#city-roads').textContent = h.roads.length ? `Via ${h.roads.join(' · ')}` : '';
+  $('#city-roads').hidden = !h.roads.length;
 }
 
 onEnter.briefing = (payload) => {
@@ -412,9 +440,12 @@ function rallyFromBriefing(r) {
   return {
     id: r.id,
     mode: r.mode,
+    target: r.target ?? 'landmark',
     difficulty: r.difficulty,
     destination: r.destination,
     arrivalTargets: r.arrivalTargets,
+    arrivalRadius: r.arrivalRadius,
+    hint: r.hint,
     routeDistance: r.route.distance,
     etaSec: r.route.duration,
     start: r.start,
@@ -432,7 +463,11 @@ onExit.briefing = () => {
 onEnter.rally = (payload) => {
   const r = session.rally;
   const mode = MODES[r.mode];
+  const city = r.target === 'city';
   $('#rally-drive-note').hidden = r.mode !== 'drive';
+  // City: you know where you're going, just not how. Keep the name (never the directions) on screen.
+  $('#rally-target').hidden = !city;
+  $('#rally-target').textContent = city ? r.destination.name : '';
   $('#dev-panel').hidden = !DEV;
   $('#manual-btn').hidden = true;
   session.gpsTrouble = 0;
@@ -444,7 +479,8 @@ onEnter.rally = (payload) => {
 
   const geom = r.geometry ?? [];
   session.tracker = geom.length > 1
-    ? createTracker(geom, { offRouteM: mode.offRouteM, maxAccuracy: mode.maxAcceptableAccuracy, state: r.trackState })
+    // No briefed route to stray from in a city rally: still record the path, never flag it off route.
+    ? createTracker(geom, { offRouteM: city ? Infinity : mode.offRouteM, maxAccuracy: mode.maxAcceptableAccuracy, state: r.trackState })
     : null;
   session.peeks = r.peeks ?? 0;
   renderPeek();
@@ -454,7 +490,7 @@ onEnter.rally = (payload) => {
 
   session.detector = createArrivalDetector({
     targets: r.arrivalTargets,
-    arrivalRadius: mode.arrivalRadius,
+    arrivalRadius: r.arrivalRadius ?? mode.arrivalRadius,
     maxAccuracy: mode.maxAcceptableAccuracy,
     dwellMs: mode.dwellMs,
     maxDwellSpeed: mode.maxDwellSpeed,
@@ -723,6 +759,7 @@ function complete(verified) {
     peeks: session.peeks,
     speeding: session.speed?.watch.incidents ?? 0,
     difficulty: r.difficulty,
+    freeRoute: r.target === 'city',
   };
   // Rallies resumed from before scoring existed have no route estimate: no grade for those.
   const scored = r.etaSec ? scoreRally(inputs) : null;
@@ -732,6 +769,7 @@ function complete(verified) {
     date: endedAt,
     timeMs,
     mode: r.mode,
+    target: r.target ?? 'landmark',
     difficulty: r.difficulty,
     name: r.destination.name,
     label: r.destination.label,
@@ -755,7 +793,7 @@ function complete(verified) {
       dest: { lat: r.destination.lat, lon: r.destination.lon, tags: photoTags(r.destination.tags) },
     }),
   };
-  let outcome = { isRecord: false, previousBest: stats.best[bestKey(r.mode, r.difficulty)] ?? null };
+  let outcome = { isRecord: false, previousBest: stats.best[bestKey(r.mode, r.difficulty, r.target)] ?? null };
   if (!DEV) {
     outcome = recordResult(stats, entry);
     stats = outcome.stats;
@@ -803,11 +841,12 @@ onEnter.discovered = (payload) => {
   else pb.textContent = `+${fmtDelta(res.timeMs - previousBest)}`;
 
   const parts = [DIFFICULTIES[res.difficulty].label, fmtDist(res.routeDistance)];
-  if (res.travelled != null) parts.push(`${fmtDist(res.travelled)} travelled`);
+  if (res.travelled) parts.push(`${fmtDist(res.travelled)} travelled`);
   $('#disc-meta').textContent = parts.join(' · ');
 
   animateTime($('#disc-time'), res.timeMs);
   renderScore(res);
+  renderNearby(res);
 
   const img = $('#disc-img');
   img.hidden = true;
@@ -891,8 +930,11 @@ function renderScore(res) {
   $('#disc-style').textContent = res.style?.name ?? '';
   $('#disc-style-line').textContent = res.style?.line ?? '';
   $('#disc-score').textContent = `${res.score} / 1000`;
-  $('#disc-acc').textContent = res.accuracy == null ? '—' : `${res.accuracy}%`;
-  $('#disc-wrong').textContent = String(res.wrongTurns ?? 0);
+  const [a, b] = statPair(res);
+  $('#disc-acc-l').textContent = a[0];
+  $('#disc-acc').textContent = a[1];
+  $('#disc-wrong-l').textContent = b[0];
+  $('#disc-wrong').textContent = b[1];
   $('#disc-peeks').textContent = String(res.peeks ?? 0);
 
   const row = (label, pts, kind = 'part') => {
@@ -934,6 +976,51 @@ function renderScore(res) {
 
 onExit.discovered = () => destroyMap('disc');
 
+/** The first two result stats. City rallies have no route to be on, so show the trip instead. */
+function statPair(res) {
+  if (res.target === 'city') {
+    const sec = res.timeMs / 1000;
+    const kmh = res.travelled && sec > 0 ? (res.travelled / sec) * 3.6 : null;
+    const speed = kmh == null ? '—' : settings.units === 'imperial' ? `${Math.round(kmh / 1.609344)} mph` : `${Math.round(kmh)} km/h`;
+    return [['Travelled', res.travelled ? fmtDist(res.travelled) : '—'], ['Avg speed', speed]];
+  }
+  return [['On route', res.accuracy == null ? '—' : `${res.accuracy}%`], ['Wrong turns', String(res.wrongTurns ?? 0)]];
+}
+
+// Random spots are a gamble: on arrival, see what's actually around you.
+const VERDICTS = [
+  [4, 'Jackpot.'],
+  [2.5, 'Not bad at all.'],
+  [0.1, 'Could be worse.'],
+  [0, 'Well… you gambled.'],
+];
+
+async function renderNearby(res) {
+  const el = $('#disc-nearby');
+  el.hidden = true;
+  if (res.target !== 'random' || session.reviewing) return;
+  const d = res.destination;
+  let pois;
+  try {
+    pois = await fetchPois({ lat: d.lat, lon: d.lon }, 250);
+  } catch {
+    return; // best effort: no verdict without place data
+  }
+  if (machine.state !== 'discovered' || session.result !== res) return;
+  const score = (p) => (p.destination ? p.weight : 0);
+  const near = pois
+    .map((p) => ({ ...p, d: haversine(d, p) }))
+    .filter((p) => p.d <= 250)
+    .sort((x, y) => score(y) - score(x) || x.d - y.d);
+  const top = near.length ? Math.max(0.1, score(near[0])) : 0;
+  const verdict = VERDICTS.find(([min]) => top >= min)[1];
+  const names = [...new Set(near.slice(0, 3).map((p) => p.name))];
+  const b = document.createElement('b');
+  b.textContent = verdict;
+  el.replaceChildren(b, names.length ? ` Nearby: ${names.join(' · ')}` : ' Nothing named within 250 m.');
+  el.hidden = false;
+}
+
 function animateTime(el, ms) {
   if (reducedMotion()) {
     el.textContent = formatElapsed(ms);
@@ -952,7 +1039,8 @@ async function share() {
   const res = session.result;
   if (!res) return;
   const grade = res.grade ? ` · ${res.grade} ${res.score}` : '';
-  const text = `🏁 Blind Rally · ${formatElapsed(res.timeMs, { tenths: false })}${grade} · ${DIFFICULTIES[res.difficulty].label} · ${fmtDist(res.routeDistance)}`;
+  const kind = res.target && res.target !== 'landmark' ? ` · ${TARGETS[res.target].label}` : '';
+  const text = `🏁 Blind Rally${kind} · ${formatElapsed(res.timeMs, { tenths: false })}${grade} · ${DIFFICULTIES[res.difficulty].label} · ${fmtDist(res.routeDistance)}`;
   const url = new URL('./', location.href).href;
   if (res.grade && (await shareCard(res, text, url))) return;
   try {
@@ -979,8 +1067,7 @@ async function shareCard(res, text, url) {
       label: res.label,
       time: formatElapsed(res.timeMs, { tenths: false }),
       stats: [
-        ['On route', res.accuracy == null ? '—' : `${res.accuracy}%`],
-        ['Wrong turns', res.wrongTurns ?? 0],
+        ...statPair(res),
         ['Peeks', res.peeks ?? 0],
         ['Distance', fmtDist(res.travelled ?? res.routeDistance)],
       ],
@@ -1171,8 +1258,11 @@ document.addEventListener('change', (e) => {
     updateScoutButton();
   } else if (t.name === 'difficulty') {
     saveSettings({ difficulty: t.value });
+  } else if (t.name === 'target') {
+    saveSettings({ target: t.value });
+    syncSetupControls();
   } else if (t.name === 'radius') {
-    saveSettings({ [`${settings.mode}Radius`]: Number(t.value) });
+    saveSettings({ [radiusKey()]: Number(t.value) });
   } else if (t.id === 'drive-ack') {
     updateScoutButton();
   } else if (t.name === 'units') {

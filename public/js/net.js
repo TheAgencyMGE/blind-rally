@@ -25,7 +25,7 @@ const sleep = (ms, signal) =>
 /**
  * fetch() with per-service spacing and a timeout. `fetchImpl` is injectable for tests.
  */
-export async function politeFetch(service, url, { signal, fetchImpl = globalThis.fetch, init = {}, now = Date.now } = {}) {
+export async function politeFetch(service, url, { signal, fetchImpl = globalThis.fetch, init = {}, now = Date.now, timeoutMs } = {}) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new ServiceError('offline', 'You appear to be offline.');
   }
@@ -35,7 +35,7 @@ export async function politeFetch(service, url, { signal, fetchImpl = globalThis
   lastCallAt[service] = now();
 
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS[service] ?? 15000);
+  const timeout = setTimeout(() => ctrl.abort(), timeoutMs ?? REQUEST_TIMEOUT_MS[service] ?? 15000);
   const onAbort = () => ctrl.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
   let res;

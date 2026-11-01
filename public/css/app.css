@@ -347,3 +347,30 @@ body[data-screen="countdown"] .countdown { display: grid; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- destination types ---------- */
+.seg--labelled span { display: grid; gap: 2px; padding: 8px 0 6px; min-height: 64px; }
+.seg--labelled small { font: 700 12px var(--display); letter-spacing: .08em; text-transform: uppercase; margin: 0; }
+.seg-note { margin-top: -6px; min-height: 1.4em; }
+
+.brief__city { display: none; }
+.screen--briefing.is-city .brief__map, .screen--briefing.is-city .dirs { display: none; }
+.screen--briefing.is-city .brief__city {
+  position: absolute; inset: 0; z-index: 1;
+  display: grid; align-content: center; justify-items: center; gap: 6px; text-align: center;
+  padding: 120px calc(var(--g) + var(--sr)) 140px calc(var(--g) + var(--sl));
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), var(--bg);
+}
+.brief__city-name { margin: 0 0 10px; font: 800 clamp(48px, 15vw, 88px)/.9 var(--display); text-transform: uppercase; overflow-wrap: anywhere; }
+.compass { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; margin: 6px 0 10px; }
+.compass svg { width: 64px; height: 64px; color: var(--accent); transition: transform .8s var(--ease); }
+.compass span { position: absolute; top: 6px; font: 700 13px var(--display); color: var(--muted); }
+.brief__city-dir { margin: 0; font: 800 30px var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.brief__city-far { margin: 0; color: var(--muted); font-size: 16px; }
+.brief__city-roads { margin: 4px 0 0; font: 700 18px var(--display); color: var(--accent); letter-spacing: .04em; }
+
+.rally__target { margin: 2px 0 0; text-align: center; font: 800 22px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); text-shadow: 0 1px 12px var(--bg); }
+.rally__target::before { content: '→ '; color: var(--muted); }
+
+.disc__nearby { margin: 6px 0 2px; font-size: 15px; color: var(--muted); }
+.disc__nearby b { color: var(--text); font-family: var(--display); font-size: 18px; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }

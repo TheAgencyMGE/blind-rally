@@ -28,10 +28,14 @@ function safeStorage() {
 
 export const DEFAULT_SETTINGS = {
   mode: 'walk',
+  target: 'landmark',
   difficulty: 'pro',
   walkRadius: 1500,
   bikeRadius: 3000,
   driveRadius: 4000,
+  walkCityRadius: 5000,
+  bikeCityRadius: 15000,
+  driveCityRadius: 40000,
   units: 'metric',
   haptics: true,
   keepAwake: true,
@@ -41,19 +45,22 @@ export function emptyStats() {
   return {
     completed: 0,
     abandoned: 0,
-    best: {}, // key `${mode}:${difficulty}` -> ms (GPS-verified only)
+    best: {}, // key from bestKey() -> ms (GPS-verified only)
     history: [], // newest first
     discovered: [], // OSM ids of unique destinations
   };
 }
 
-export const bestKey = (mode, difficulty) => `${mode}:${difficulty}`;
+// Landmark keys keep their original `mode:difficulty` form so existing bests survive;
+// other destination types get their own table (a city run isn't comparable to a 2 km landmark).
+export const bestKey = (mode, difficulty, target = 'landmark') =>
+  target === 'landmark' ? `${mode}:${difficulty}` : `${target}/${mode}:${difficulty}`;
 
 /** Pure: returns new stats and a comparison against the previous best. */
 export function recordResult(stats, result) {
   const s = structuredClone(stats);
   s.completed += 1;
-  const key = bestKey(result.mode, result.difficulty);
+  const key = bestKey(result.mode, result.difficulty, result.target);
   const previousBest = s.best[key] ?? null;
   const eligible = result.verified === 'gps' && !result.dev;
   let isRecord = false;
@@ -65,6 +72,7 @@ export function recordResult(stats, result) {
     date: result.date,
     timeMs: result.timeMs,
     mode: result.mode,
+    target: result.target ?? 'landmark',
     difficulty: result.difficulty,
     name: result.name,
     label: result.label ?? null,
@@ -90,11 +98,12 @@ export function recordAbandon(stats) {
   return { ...structuredClone(stats), abandoned: stats.abandoned + 1 };
 }
 
-/** Overall best for a mode across difficulties. */
-export function bestForMode(stats, mode) {
+/** Overall best for a mode (and destination type) across difficulties. */
+export function bestForMode(stats, mode, target = 'landmark') {
+  const prefix = bestKey(mode, '', target);
   let best = null;
   for (const [k, v] of Object.entries(stats.best)) {
-    if (k.startsWith(`${mode}:`) && (best == null || v < best)) best = v;
+    if (k.startsWith(prefix) && (best == null || v < best)) best = v;
   }
   return best;
 }

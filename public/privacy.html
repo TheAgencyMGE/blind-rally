@@ -33,6 +33,7 @@
       <li>Your position is checked <strong>only while the game is open and visible</strong>. When you switch apps or lock your phone, GPS checking stops. There is no background tracking.</li>
       <li>During a rally your path is recorded <strong>on your device</strong> so the results screen can show where you went and score how closely you followed the route. A simplified copy is kept with that rally in your history (below). It is never uploaded.</li>
       <li>When driving, your current position is sent to the Overpass API about once a minute to look up the road's speed limit.</li>
+      <li>When you arrive at a random spot, its coordinates are sent to the Overpass API (or Wikipedia, if Overpass is busy) to see what's nearby.</li>
       <li>To find a destination and a route, your <strong>starting coordinates</strong> are sent to the public OpenStreetMap services listed below. Nothing identifies you in those requests beyond what any web request reveals (such as your IP address).</li>
     </ul>
 
@@ -50,8 +51,8 @@
       <thead><tr><th>Service</th><th>What it receives</th><th>Why</th></tr></thead>
       <tbody>
         <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Map tile requests for the area being shown</td><td>Drawing the 3D map</td></tr>
-        <tr><td>Wikipedia geosearch</td><td>Your start coordinates and search radius, only if Overpass is unavailable</td><td>Fallback for finding places</td></tr>
-        <tr><td>Overpass API (overpass-api.de)</td><td>Your start coordinates and search radius; while driving, your current position about once a minute</td><td>Finding public places nearby; road speed limits</td></tr>
+        <tr><td>Wikipedia geosearch</td><td>Your start coordinates and search radius (or points around it, for cities), or a random spot's coordinates, only if Overpass is unavailable</td><td>Fallback for finding places and towns</td></tr>
+        <tr><td>Overpass API (overpass-api.de)</td><td>Your start coordinates and search radius; a random spot's coordinates when you arrive there; while driving, your current position about once a minute</td><td>Finding public places and towns nearby; what's around a random spot; road speed limits</td></tr>
         <tr><td>OSRM routing on FOSSGIS servers (routing.openstreetmap.de), OSRM demo server</td><td>Start and destination coordinates</td><td>Calculating the route</td></tr>
         <tr><td>Nominatim (nominatim.openstreetmap.org)</td><td>Only the text you type into the start-point search</td><td>Finding a place on the map</td></tr>
         <tr><td>Wikidata, Wikipedia, Wikimedia Commons</td><td>The discovered destination's Wikidata/Wikipedia identifier</td><td>Showing a photo and description after you arrive</td></tr>

@@ -50,6 +50,39 @@ export const MODES = {
   },
 };
 
+// What a rally sends you to.
+//  landmark: a named public place (the classic game)
+//  random:   a random public spot on the path/road network: never fails for lack of landmarks, could be great or grim
+//  city:     a town or city far away, with only vague directions. You find your own way.
+export const TARGETS = {
+  landmark: { id: 'landmark', label: 'Landmark' },
+  random: { id: 'random', label: 'Random spot' },
+  city: { id: 'city', label: 'City' },
+};
+
+// Random spots: how many random points we'll try to route to before settling for the least-bad one.
+export const RANDOM_ATTEMPTS = 8;
+
+export const CITY = {
+  // Much wider search than landmarks, per travel mode (metres).
+  radiusOptions: {
+    walk: [3000, 5000, 8000, 12000, 16000],
+    bike: [8000, 15000, 25000, 40000, 60000],
+    drive: [20000, 40000, 70000, 100000, 150000],
+  },
+  defaultRadius: { walk: 5000, bike: 15000, drive: 40000 },
+  // Which OSM place types count, per mode. On foot a new suburb is a big enough trip.
+  places: {
+    walk: ['town', 'village', 'suburb', 'quarter', 'neighbourhood'],
+    bike: ['city', 'town', 'village', 'suburb'],
+    drive: ['city', 'town'],
+  },
+  // You've arrived when you're inside the place, roughly. Bigger places, bigger zone.
+  arrivalRadius: { city: 2500, town: 1200, suburb: 800, village: 500, quarter: 450, neighbourhood: 400 },
+  minFraction: 0.25, // not the town you're already in
+  overpassTimeoutMs: 16000, // then fall back to Wikipedia
+};
+
 // Destinations are never closer than this fraction of the max radius (straight line).
 export const MIN_RADIUS_FRACTION = 0.35;
 // Reject routes that are far longer than the radius suggests (rivers, motorways, detours).

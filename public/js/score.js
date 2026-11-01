@@ -12,6 +12,7 @@ export const SCORING = {
   accuracyPerPct: 4,
   accuracyMax: 300,
   extraGrace: 0.2, // 20% extra distance is free (GPS noise, crossing streets)
+  freeExtraGrace: 0.5, // city rallies: you pick your own way, so more slack
   extraPerUnit: 250,
   extraMax: 200,
   wrongTurn: 40,
@@ -42,6 +43,7 @@ export const gradeFor = (score) => GRADES.find(([, min]) => score >= min)[0];
  * @param {number} r.peeks
  * @param {number} [r.speeding]   speeding incidents (drive)
  * @param {string} r.difficulty
+ * @param {boolean} [r.freeRoute] city rallies: no briefed route, so no accuracy or wrong-turn scoring
  */
 export function scoreRally(r) {
   const S = SCORING;
@@ -54,18 +56,21 @@ export function scoreRally(r) {
   if (ratio <= 0.9) add('pace', S.underParBonus);
   else if (ratio > S.parGrace) add('pace', -Math.min(S.paceMax, (ratio - S.parGrace) * S.pacePerUnit));
 
-  const acc = Number.isFinite(r.accuracy) ? r.accuracy : 100;
-  add('accuracy', -Math.min(S.accuracyMax, (100 - acc) * S.accuracyPerPct));
+  if (!r.freeRoute) {
+    const acc = Number.isFinite(r.accuracy) ? r.accuracy : 100;
+    add('accuracy', -Math.min(S.accuracyMax, (100 - acc) * S.accuracyPerPct));
+  }
 
   if (r.travelled != null && r.routeDistance > 0) {
     const extra = r.travelled / r.routeDistance - 1;
-    if (extra > S.extraGrace) add('distance', -Math.min(S.extraMax, (extra - S.extraGrace) * S.extraPerUnit));
+    const grace = r.freeRoute ? S.freeExtraGrace : S.extraGrace;
+    if (extra > grace) add('distance', -Math.min(S.extraMax, (extra - grace) * S.extraPerUnit));
   }
 
-  add('wrongTurns', -Math.min(S.wrongTurnMax, (r.wrongTurns ?? 0) * S.wrongTurn));
+  if (!r.freeRoute) add('wrongTurns', -Math.min(S.wrongTurnMax, (r.wrongTurns ?? 0) * S.wrongTurn));
   add('peeks', -(r.peeks ?? 0) * S.peek);
   add('speeding', -(r.speeding ?? 0) * S.speeding);
-  if (!r.wrongTurns && !r.peeks) add('clean', S.cleanBonus);
+  if ((r.freeRoute || !r.wrongTurns) && !r.peeks) add('clean', S.cleanBonus);
 
   const raw = parts.reduce((a, p) => a + p.points, S.base);
   const score = Math.max(0, Math.min(1000, raw));
@@ -81,6 +86,8 @@ export function styleFor(r, { score, paceRatio }) {
   if (paceRatio <= 0.85 && r.wrongTurns <= 1) return { id: 'speedrunner', name: 'Speedrunner', line: 'Faster than the router thought possible.' };
   if (r.wrongTurns >= 3) return { id: 'comeback', name: 'Comeback Kid', line: 'Lost the plot. Found the place.' };
   if (extra > 0.6) return { id: 'scenic', name: 'Scenic Route', line: 'Saw every street except the right one.' };
+  if (r.freeRoute && !r.peeks && paceRatio <= 1.1) return { id: 'pathfinder', name: 'Pathfinder', line: 'No directions. No problem.' };
+  if (r.freeRoute && extra > 0.5) return { id: 'explorer', name: 'Explorer', line: 'Found the place. And a few others on the way.' };
   if (!r.wrongTurns && !r.peeks) return { id: 'precision', name: 'Precision Pilot', line: 'Every turn, exactly as briefed.' };
   if (paceRatio > 1.6) return { id: 'wanderer', name: 'Wanderer', line: 'Not lost. Just taking it in.' };
   return { id: 'veteran', name: 'Rally Veteran', line: 'Knows the streets well enough.' };

@@ -186,3 +186,65 @@ export function attachLandmarks(steps, pois, destinationId, maxDist = 45) {
     return best ? { ...s, landmark: best.name } : s;
   });
 }
+
+// ---- Cities: towns and cities (or suburbs on foot) for the city target.
+const PLACE_LABEL = { city: 'City', town: 'Town', village: 'Village', suburb: 'Suburb', quarter: 'Quarter', neighbourhood: 'Neighbourhood' };
+const PLACE_WEIGHT = { city: 4, town: 3.5, suburb: 3, village: 2.5, quarter: 2, neighbourhood: 1.5 };
+
+/** Overpass query for named settlements of the given types. Nodes only: one point per place, cheap at 100+ km. */
+export function buildCityQuery(center, radius, places) {
+  const at = `(around:${Math.round(radius)},${center.lat.toFixed(6)},${center.lon.toFixed(6)})`;
+  // "out body", not "out tags": tags alone drops the coordinates.
+  return `[out:json][timeout:15];\nnode${at}[name]["place"~"${regex(places)}"];\nout body qt 600;`;
+}
+
+export function parseCities(json, places) {
+  const allowed = new Set(places);
+  const out = [];
+  for (const el of json?.elements ?? []) {
+    const tags = el.tags ?? {};
+    const name = (tags.name ?? '').trim();
+    const p = { lat: el.lat, lon: el.lon };
+    if (!name || !allowed.has(tags.place) || !isValidCoord(p)) continue;
+    const pop = Number.parseInt(String(tags.population ?? '').replace(/[^\d]/g, ''), 10);
+    // Bigger places are a little likelier: more to explore when you get there.
+    const boost = Number.isFinite(pop) && pop > 0 ? Math.min(1.5, Math.log10(pop) / 5) : 0.6;
+    out.push({
+      id: `${el.type?.[0] ?? 'n'}${el.id}`,
+      name,
+      lat: p.lat,
+      lon: p.lon,
+      kind: `place=${tags.place}`,
+      place: tags.place,
+      label: PLACE_LABEL[tags.place],
+      weight: PLACE_WEIGHT[tags.place] * boost,
+      destination: true,
+      area: true,
+      tags: pick(tags, ['wikidata', 'wikipedia', 'image', 'wikimedia_commons', 'population']),
+    });
+  }
+  return out;
+}
+
+/** Wikipedia fallback for cities: geosearch results whose coordinates are tagged type:city (any settlement). */
+export function parseWikiCities(json, lang = 'en') {
+  const out = [];
+  for (const g of json?.query?.geosearch ?? []) {
+    const p = { lat: g.lat, lon: g.lon };
+    if (g.type !== 'city' || !g.title || !isValidCoord(p)) continue;
+    out.push({
+      id: `wp${lang}${g.pageid}`,
+      name: g.title.replace(/,.*$/, '').replace(/\s*\([^)]*\)\s*$/, ''), // "Bellevue, Washington" → "Bellevue"
+      lat: g.lat,
+      lon: g.lon,
+      kind: 'wikipedia',
+      place: 'town', // Wikipedia can't tell a town from a neighbourhood: mid-sized arrival zone
+      label: 'Place',
+      weight: 2.5,
+      destination: true,
+      area: true,
+      tags: { wikipedia: `${lang}:${g.title}` },
+    });
+  }
+  return out;
+}

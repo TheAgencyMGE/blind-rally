@@ -28,13 +28,19 @@ then find a hidden destination from memory, against the clock.
 
 | | |
 |---|---|
-| **1. Start where you stand** | Your GPS position is the start line. Pick walking, cycling or driving, a briefing time and a max distance. |
+| **1. Start where you stand** | Your GPS position is the start line. Pick walking, cycling or driving, what kind of destination, a briefing time and a max distance. |
 | **2. Memorize** | A tilted 3D map shows the route, the turns and the street names. You get **60 s** (Rookie), **30 s** (Pro) or **15 s** (Insane). |
 | **3. It's gone** | The map, the line and the directions vanish. The stage clock starts. |
 | **4. Find it** | Navigate from memory on a locked map that only shows where you are. Stuck? Peek at the route for 8 s (3 per rally, −75 each). Stop at the destination and GPS confirms you've arrived. |
 | **5. Discover** | Only now do you learn where you were going: its name, a photo, your time, an S–F grade and a replay of your path against the route you memorized. |
 
-The destination can be **a place** (a monument, museum, fountain or pier), **an area** (a park, plaza or neighbourhood), **a road** (a pedestrian street or scenic drive) or **something scenic** (a viewpoint, beach, waterfall or summit). It is never named until you arrive, not even in the directions or the map labels.
+### Three kinds of destination
+
+| | |
+|---|---|
+| 🏛️ **Landmark** (default) | A cool public place: a monument, museum, fountain or pier, a park or plaza, a pedestrian street or scenic drive, or something scenic like a viewpoint, beach, waterfall or summit. It is never named until you arrive, not even in the directions or the map labels. |
+| 🎲 **Random spot** | A random point in range, snapped by the router to the nearest public path or road. It needs no place data, so it works where there are no landmarks at all. It's a gamble: on arrival you see what's actually around you, from *Jackpot* to *Well… you gambled*. |
+| 🏙️ **City** | A town or city in a much wider radius (up to 16 km on foot, 60 km by bike, 150 km by car; suburbs count on foot). You're told its name and only vague directions: which way, roughly how far, and the big roads. No turn-by-turn and no wrong turns; find your own way. Arrival is anywhere near the centre. |
 
 > [!IMPORTANT]
 > **Driving mode is for passengers.** The game won't start until you confirm that a passenger holds the phone. The driver drives, and the navigator remembers.
@@ -42,7 +48,7 @@ The destination can be **a place** (a monument, museum, fountain or pier), **an 
 ## Features
 
 - **🗺️ 3D briefing map**: dark vector tiles with extruded buildings, rotated so your route runs up the screen.
-- **🧭 Real, reachable destinations**: public places from OpenStreetMap, routed and checked for walk or car access, with private, restricted and unroutable spots filtered out.
+- **🧭 Real, reachable destinations**: public places from OpenStreetMap, routed and checked for walk, bike or car access, with private, restricted and unroutable spots filtered out. Or roll the dice on a random spot, or head for a whole other town.
 - **📍 Honest arrival detection**: arrival is gated on GPS accuracy, and you must stay in the zone for a few seconds at low speed, so driving past doesn't count.
 - **🎯 Scored runs**: a 0–1000 score and S–F grade from pace, how much of your path was on the route, extra distance, wrong turns and peeks, with every point itemised. Plus a title for how you played (Human GPS, Speedrunner, Scenic Route…).
 - **↩️ Silent wrong-turn detection**: leaving the briefed route is noticed (with GPS-jitter tolerance) but never shown until the end.
@@ -50,7 +56,7 @@ The destination can be **a place** (a monument, museum, fountain or pier), **an 
 - **🎬 Replays**: the results map draws your path (orange, red where you were off route) over the dashed briefed route, with a speed chart. Tap any rally in history to replay it.
 - **🖼️ Share card**: an image of your grade, time and the shape of your run.
 - **⏱️ Refresh-proof timer**: the clock is based on timestamps, so a reload drops you straight back into the rally with the clock still running.
-- **🏁 Personal bests** for each mode and difficulty, plus history and stats, all stored on your device.
+- **🏁 Personal bests** for each mode, difficulty and destination type, plus history and stats, all stored on your device.
 - **📱 Installable PWA**: safe-area aware, offline app shell, and the screen stays awake during a rally.
 - **🔒 Private by design**: no accounts, analytics, cookies or background tracking.
 - **🆓 $0 to run**: static files, with no API keys and no backend.
@@ -91,8 +97,8 @@ public/
   index.html            every screen; one visible at a time via body[data-screen]
   js/app.js             UI controller: state machine ↔ DOM ↔ GPS ↔ maps
   js/state.js           explicit game state machine (illegal transitions throw)
-  js/rally.js           destination pipeline: places → rank → route → validate
-  js/destinations.js    Overpass query/parse, Wikipedia fallback, weighted ranking
+  js/rally.js           destination pipelines: landmark, random spot, city
+  js/destinations.js    Overpass queries/parsing (places and cities), Wikipedia fallback, weighted ranking
   js/routing.js         OSRM parsing and turn instructions
   js/arrival.js         accuracy-gated, dwell-based arrival detection + odometer
   js/track.js           silent route tracking: off-route hysteresis, accuracy, path recording
@@ -117,6 +123,10 @@ tests/                  node:test suites
 5. The arrival zone covers both the feature and the point where the route ends, since a park's centre can be far from its entrance.
 6. The destination's name is scrubbed from the directions and the map labels.
 
+**Random spot:** up to 8 random points in the same ring are routed. The router snaps each one to the nearest way it can use, so the end is always on a public path or road; points that snap too far (water, private land) are retried. If every try is imperfect (say, too many turns), the least-bad reachable one is used instead of failing. The spot is named after its street. On arrival, named places within 250 m decide the verdict.
+
+**City:** one Overpass query for `place=city|town` nodes (plus villages and suburbs on foot or by bike) within the radius, falling back to Wikipedia settlements when Overpass is slow. Places closer than 25% of the radius are skipped, bigger ones are a little likelier, and the chosen one is routed only to learn the distance and the roads carrying most of the trip. The arrival zone scales with the place: 2.5 km for a city, 1.2 km for a town, down to 400 m for a neighbourhood.
+
 </details>
 
 <details>
@@ -137,7 +147,7 @@ All free and keyless. Please respect their usage policies.
 | Service | Used for | Notes |
 |---|---|---|
 | [OpenFreeMap](https://openfreemap.org) | 3D vector tiles | Free, no key |
-| [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | Finding places; speed limits when driving | One query per rally (cached); speed limits at most once per 45 s and 250 m |
+| [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | Finding places and cities; what's near a random spot; speed limits when driving | One query per rally (cached), plus one on arriving at a random spot; speed limits at most once per 45 s and 250 m |
 | [Wikipedia geosearch](https://www.mediawiki.org/wiki/API:Geosearch) | Fallback places | Used only when Overpass is unavailable |
 | [OSRM on FOSSGIS](https://routing.openstreetmap.de) | Walking, cycling and driving routes | Requests spaced ≥1.1 s apart, at most 6 per rally |
 | [OSRM demo](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) | Driving fallback | Demo server, low volume |
